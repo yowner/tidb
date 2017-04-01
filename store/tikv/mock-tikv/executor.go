@@ -34,7 +34,7 @@ type executor interface {
 
 type tableScanExec struct {
 	*tipb.TableScan
-	colsID      map[int64]int
+	colIDs      map[int64]int
 	kvRanges    []kv.KeyRange
 	startTS     uint64
 	mvccStore   *MvccStore
@@ -89,7 +89,7 @@ func (e *tableScanExec) getRowFromPoint(ran kv.KeyRange) (int64, [][]byte, error
 	if err != nil {
 		return 0, nil, errors.Trace(err)
 	}
-	row, err := getRowData(e.Columns, e.colsID, handle, val)
+	row, err := getRowData(e.Columns, e.colIDs, handle, val)
 	if err != nil {
 		return 0, nil, errors.Trace(err)
 	}
@@ -142,7 +142,7 @@ func (e *tableScanExec) getRowFromRange(ran kv.KeyRange) (int64, [][]byte, error
 	if err != nil {
 		return 0, nil, errors.Trace(err)
 	}
-	row, err := getRowData(e.Columns, e.colsID, handle, pair.Value)
+	row, err := getRowData(e.Columns, e.colIDs, handle, pair.Value)
 	if err != nil {
 		return 0, nil, errors.Trace(err)
 	}
@@ -248,9 +248,9 @@ func (e *indexScanExec) getRowFromRange(ran kv.KeyRange) (int64, [][]byte, error
 
 type selectionExec struct {
 	*tipb.Selection
-	sc     *variable.StatementContext
-	eval   *xeval.Evaluator
-	colsID map[int64]int
+	sc            *variable.StatementContext
+	eval          *xeval.Evaluator
+	relatedColIDs []int64
 
 	src executor
 }
@@ -269,7 +269,7 @@ func (e *selectionExec) Next() (int64, [][]byte, error) {
 			return 0, nil, nil
 		}
 
-		err = e.eval.SetRowValue(handle, row, e.colsID)
+		err = e.eval.SetRowValue(handle, row, e.relatedColIDs)
 		if err != nil {
 			return 0, nil, errors.Trace(err)
 		}
@@ -343,28 +343,29 @@ func getRowData(columns []*tipb.ColumnInfo, colIDs map[int64]int, handle int64, 
 	return values, nil
 }
 
-func extractColIDsInExpr(expr *tipb.Expr, columns []*tipb.ColumnInfo, collector map[int64]int) error {
+func extractColIDsInExpr(expr *tipb.Expr, columns []*tipb.ColumnInfo, collector []int64) ([]int64, error) {
 	if expr == nil {
-		return nil
+		return collector, nil
 	}
 	if expr.GetTp() == tipb.ExprType_ColumnRef {
 		_, i, err := codec.DecodeInt(expr.Val)
 		if err != nil {
-			return errors.Trace(err)
+			return nil, errors.Trace(err)
 		}
-		for idx, c := range columns {
+		for _, c := range columns {
 			if c.GetColumnId() == i {
-				collector[i] = idx
-				return nil
+				collector = append(collector, i)
+				return collector, nil
 			}
 		}
-		return xeval.ErrInvalid.Gen("column %d not found", i)
+		return nil, xeval.ErrInvalid.Gen("column %d not found", i)
 	}
+	var err error
 	for _, child := range expr.Children {
-		err := extractColIDsInExpr(child, columns, collector)
+		collector, err = extractColIDsInExpr(child, columns, collector)
 		if err != nil {
-			return errors.Trace(err)
+			return nil, errors.Trace(err)
 		}
 	}
-	return nil
+	return collector, nil
 }

@@ -87,15 +87,11 @@ func (h *rpcHandler) buildExec(ctx *dagContext, curr *tipb.Executor) (executor, 
 	case tipb.ExecType_TypeTableScan:
 		columns := curr.TblScan.Columns
 		ctx.eval.SetColumnInfos(columns)
-		colIDs := make(map[int64]int)
-		for i, col := range columns {
-			colIDs[col.GetColumnId()] = i
-		}
 		ranges := h.extractKVRanges(ctx.keyRanges, *curr.TblScan.Desc)
 		currExec = &tableScanExec{
 			TableScan:   curr.TblScan,
 			kvRanges:    ranges,
-			colsID:      colIDs,
+			colIDs:      ctx.eval.ColIDs,
 			startTS:     ctx.dagReq.GetStartTs(),
 			mvccStore:   h.mvccStore,
 			rawStartKey: h.rawStartKey,
@@ -125,16 +121,15 @@ func (h *rpcHandler) buildExec(ctx *dagContext, curr *tipb.Executor) (executor, 
 		if len(curr.Selection.Conditions) > 0 {
 			cond = curr.Selection.Conditions[0]
 		}
-		colIDs := make(map[int64]int)
-		err := extractColIDsInExpr(cond, ctx.eval.ColumnInfos, colIDs)
+		colIDs, err := extractColIDsInExpr(cond, ctx.eval.ColumnInfos, nil)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 		currExec = &selectionExec{
-			Selection: curr.Selection,
-			eval:      ctx.eval,
-			colsID:    colIDs,
-			sc:        ctx.sc,
+			Selection:     curr.Selection,
+			eval:          ctx.eval,
+			relatedColIDs: colIDs,
+			sc:            ctx.sc,
 		}
 	default:
 		// TODO: Support other types.
