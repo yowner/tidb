@@ -25,68 +25,8 @@ import (
 	"github.com/pingcap/tidb/util/types"
 )
 
-const (
-	// TypeSel is the type of Selection.
-	TypeSel = "Selection"
-	// TypeSet is the type of Set.
-	TypeSet = "Set"
-	// TypeProj is the type of Projection.
-	TypeProj = "Projection"
-	// TypeAgg is the type of Aggregation.
-	TypeAgg = "Aggregation"
-	// TypeStreamAgg is the type of StreamAgg.
-	TypeStreamAgg = "StreamAgg"
-	// TypeHashAgg is the type of HashAgg.
-	TypeHashAgg = "HashAgg"
-	// TypeCache is the type of cache.
-	TypeCache = "Cache"
-	// TypeShow is the type of show.
-	TypeShow = "Show"
-	// TypeJoin is the type of Join.
-	TypeJoin = "Join"
-	// TypeUnion is the type of Union.
-	TypeUnion = "Union"
-	// TypeTableScan is the type of TableScan.
-	TypeTableScan = "TableScan"
-	// TypeMemTableScan is the type of TableScan.
-	TypeMemTableScan = "MemTableScan"
-	// TypeDummy is the type of TableScan.
-	TypeDummy = "Dummy"
-	// TypeUnionScan is the type of UnionScan.
-	TypeUnionScan = "UnionScan"
-	// TypeIdxScan is the type of IndexScan.
-	TypeIdxScan = "IndexScan"
-	// TypeSort is the type of Sort.
-	TypeSort = "Sort"
-	// TypeLimit is the type of Limit.
-	TypeLimit = "Limit"
-	// TypeHashSemiJoin is the type of hash semi join.
-	TypeHashSemiJoin = "HashSemiJoin"
-	// TypeHashLeftJoin is the type of left hash join.
-	TypeHashLeftJoin = "HashLeftJoin"
-	// TypeHashRightJoin is the type of right hash join.
-	TypeHashRightJoin = "HashRightJoin"
-	// TypeMergeJoin is the type of merge join.
-	TypeMergeJoin = "MergeJoin"
-	// TypeApply is the type of Apply.
-	TypeApply = "Apply"
-	// TypeMaxOneRow is the type of MaxOneRow.
-	TypeMaxOneRow = "MaxOneRow"
-	// TypeExists is the type of Exists.
-	TypeExists = "Exists"
-	// TypeDual is the type of TableDual.
-	TypeDual = "TableDual"
-	// TypeLock is the type of SelectLock.
-	TypeLock = "SelectLock"
-	// TypeInsert is the type of Insert
-	TypeInsert = "Insert"
-	// TypeUpate is the type of Update.
-	TypeUpate = "Update"
-	// TypeDelete is the type of Delete.
-	TypeDelete = "Delete"
-	// TypeAnalyze is the type of Analyze.
-	TypeAnalyze = "Analyze"
-)
+// UseDAGPlanBuilder means we should use new planner and dag pb.
+var UseDAGPlanBuilder = false
 
 // Plan is the description of an execution flow.
 // It is created from ast.Node first, then optimized by the optimizer,
@@ -191,6 +131,9 @@ type LogicalPlan interface {
 
 	// buildKeyInfo will collect the information of unique keys into schema.
 	buildKeyInfo()
+
+	// pushDownTopN will push down the topN or limit operator during logical optimization.
+	pushDownTopN(topN *Sort) LogicalPlan
 }
 
 // PhysicalPlan is a tree of the physical operators.
@@ -266,7 +209,7 @@ func (p *baseLogicalPlan) buildKeyInfo() {
 	}
 	if len(p.basePlan.children) == 1 {
 		switch p.basePlan.self.(type) {
-		case *Exists, *Aggregation, *Projection:
+		case *Exists, *LogicalAggregation, *Projection:
 			p.basePlan.schema.Keys = nil
 		case *SelectLock:
 			p.basePlan.schema.Keys = p.basePlan.children[0].Schema().Keys
